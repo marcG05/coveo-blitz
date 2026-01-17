@@ -16,6 +16,8 @@ class Bot:
         """
         Starter bot that moves spores across the map to explore and claim territory.
         """
+        use_spores_list : list[Spore] = []
+        
         actions = []
         my_team: TeamInfo = game_message.world.teamInfos[game_message.yourTeamId]
         game_map = game_message.world.map
@@ -37,7 +39,7 @@ class Bot:
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
-            if my_team.nutrients >= 20:
+            if my_team.nutrients >= 20 and game_message.tick % 25 == 0:
                 for spawner in my_team.spawners:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=20)
@@ -98,6 +100,9 @@ class Bot:
                 )
             )
             print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
+
+        
+
         
         return actions
     
