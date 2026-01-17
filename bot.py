@@ -169,45 +169,45 @@ class Bot:
     def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict) -> Position:
         best_score = -float('inf')
         best_position = Position(x=random.randint(0, game_map.width - 1), y=random.randint(0, game_map.height - 1))
-        
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        # On échantillonne beaucoup de cases pour trouver les meilleures opportunités d'étalement
-        for _ in range(60):
+        for _ in range(80):
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            if (x, y) in taken_positions: 
-                continue
+            if (x, y) in taken_positions: continue
 
             target_biomass = world.biomassGrid[y][x]
             target_owner = world.ownershipGrid[y][x]
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
 
-            # --- LOGIQUE DE SPREAD (EXPANSION) ---
-            score = nutrients * 5 # Les nutriments restent une base
+            # --- DÉTECTION DE MUR / DANGER ---
+            # On regarde la biomasse autour de la cible (rayon de 1)
+            proximity_danger = 0
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < game_map.width and 0 <= ny < game_map.height:
+                        # Si c'est un ennemi ou neutre, on ajoute sa biomasse au danger
+                        if world.ownershipGrid[ny][nx] != spore.teamId:
+                            proximity_danger += world.biomassGrid[ny][nx]
 
+            # --- CALCUL DU SCORE FINAL ---
+            # 1. Priorité massive aux nutriments
+            score = nutrients * 30 
+            
+            # 2. On pénalise le "Mur" : Si le danger total autour est > 20, on fuit
+            if proximity_danger > 20:
+                score -= (proximity_danger * 50) # Grosse pénalité pour les zones denses
+
+            # 3. On pénalise la biomasse directe sur la tuile
             if target_owner != spore.teamId:
-                # GROS BONUS : C'est ici qu'on spread !
-                # On veut aller là où on n'est PAS encore.
-                score += 100 
-                
-                # Mais on veut la biomasse la plus PETITE possible (facile à capturer)
-                # Chaque point de biomasse ennemie réduit l'intérêt de la case
-                score -= (target_biomass * 25)
-
-                # Sécurité : On ne fonce pas dans un mur plus gros que nous
-                if target_biomass >= spore.biomass:
-                    continue
-            else:
-                # Si la case est déjà à nous, le score est plus faible 
-                # car cela ne nous aide pas à "spread"
-                score += 10 
-                # Le seul avantage est que le mouvement est gratuit.
-
-            # Pénalité de distance pour ne pas viser l'autre bout de la map inutilement
-            score -= distance * 1.2
+                score -= (target_biomass * 40)
+                if target_biomass >= spore.biomass: continue # Sécurité survie
+            
+            # 4. Pénalité de distance légère
+            score -= distance * 1.5
 
             if score > best_score:
                 best_score = score
