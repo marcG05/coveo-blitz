@@ -7,6 +7,7 @@ class Bot:
         print("Initializing your super mega duper bot")
         self.exploration_targets = {}  # Track where each spore is heading
         self.spawner_created = False
+        use_spores_list = []
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
@@ -16,61 +17,51 @@ class Bot:
         my_team: TeamInfo = game_message.world.teamInfos[game_message.yourTeamId]
         game_map = game_message.world.map
         
+        # Strategy: Create one spawner, then produce spores and explore the map
+        
         # Step 1: Create initial spawner if we don't have one
         if len(my_team.spawners) == 0 and len(my_team.spores) > 0:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
             self.spawner_created = True
+            print(f"Tick {game_message.tick}: Creating spawner")
+        elif game_message.tick % 200 == 0:
+            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-5].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
-        elif len(my_team.spawners) > 0 and len(my_team.spores) < 5:
-            possiblites = 0
-            if my_team.nutrients >= 20:
-                possiblites = 1
-            if my_team.nutrients >= 50:
-                possiblites = 2
-            if my_team.nutrients >= 100:
-                possiblites = 3
-            if my_team.nutrients >= 200:
-                possiblites = 4
+        elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
-            if possiblites == 1:
+            if my_team.nutrients >= 20:
                 for spawner in my_team.spawners:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=20)
                     )
-                    break  # Produce one at a time
-            if possiblites == 2:
-                for spawner in my_team.spawners:
-                    actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=50)
-                    )
-                    break  # Produce one at a time
-            if possiblites == 3:
-                for spawner in my_team.spawners:
-                    actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=100)
-                    )
-                    break  # Produce one at a time
-            if possiblites == 4:
-                for spawner in my_team.spawners:
-                    actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=200)
-                    )
+                    print(f"Tick {game_message.tick}: Producing spore from spawner")
                     break  # Produce one at a time
         
         # Step 3: Move all spores to explore the map
-        for spore in my_team.spores:
+        if len(my_team.spores) > 4:
+            use_spores_list = my_team.spores[1:]
+            actions.append(
+                SporeSplitAction(my_team.spores[0], my_team.spores[0].biomass*0.3, Position(0,1))
+            )
+        else:
+            use_spores_list = my_team.spores
+
+        for spore in use_spores_list:
             # Check if spore reached its target or doesn't have one
             if spore.id not in self.exploration_targets:
+                # Assign a new exploration target
                 target = self._get_exploration_target(spore, game_map, game_message.world)
                 self.exploration_targets[spore.id] = target
-            
             else:
                 target = self.exploration_targets[spore.id]
+                # Check if we reached the target (within 1 tile)
                 if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
+                    # Get a new target
                     target = self._get_exploration_target(spore, game_map, game_message.world)
                     self.exploration_targets[spore.id] = target
             
+            # Move towards target
             actions.append(
                 SporeMoveToAction(
                     sporeId=spore.id,
@@ -97,6 +88,11 @@ class Bot:
         for _ in range(10):
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
+            
+            # Calculate score based on:
+            # 1. Nutrient value of the tile
+            # 2. Distance from spore (prefer closer tiles)
+            # 3. Whether it's owned by another team (prefer neutral/enemy tiles)
             
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
