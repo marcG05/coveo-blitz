@@ -55,6 +55,11 @@ class Bot:
                 if g.teamId != my_team.teamId:
                     spawn_pos = g.position
                     break
+            if spawn == None:
+                    for g in game_message.world.spores:
+                        if g.teamId != my_team.teamId:
+                            spawn = g.position
+                            break
             
             if spawn_pos:
                 # Select top 4 strongest spores not yet used
