@@ -18,6 +18,7 @@ class Bot:
         self.newDefensePosition : Position = None
         self.tenHighest : list[str] = []
         self.state = CONVERING
+        self.last_positions = {} # {spore_id: Position_objet}
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
@@ -117,73 +118,66 @@ class Bot:
                 highBio = spore.biomass
                 self.highestSpore = spore
 
-            if self.state == CONVERING: # (Note: Attention à l'orthographe "COVERING" ?)
-                if spore.id in self.defense_list_id:
-                    continue
-                    
-                if spore.id not in self.exploration_targets:
-                    # LOGIQUE : Les 2 premières spores (index 0, 1) ciblent les nutriments.
-                    # À partir de la 3ème (index 2), on alterne : 1 sur 3 fait du spread neutre.
-                    is_colonizer = (index >= 6 and index % 3 == 0)
-                    
-                    target = self._get_exploration_target(
-                        spore, 
-                        game_map, 
-                        game_message.world, 
-                        self.exploration_targets, 
-                        force_neutral=is_colonizer
-                    )
-                    self.exploration_targets[spore.id] = target
-                else:
-                    target = self.exploration_targets[spore.id]
-                    # Si on est arrivé (distance <= 1), on demande une nouvelle cible
-                    if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
-                        is_colonizer = (index >= 6 and index % 3 == 0)
-                        target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets, force_neutral=is_colonizer)
+            if self.state in [CONVERING, LISTSPORE]: 
+                for index, spore in enumerate(my_team.spores):
+                    if spore.id in alreadyPlayed_id or spore.id in self.defense_list_id:
+                        continue
+
+                    # 1. Gestion du Split (Expansion)
+                    if spore.biomass > 20:
+                        valid_dir = self.get_valid_direction(spore, game_map)
+                        actions.append(SporeSplitAction(spore.id, 10, valid_dir))
+                        continue
+
+                    # 2. Attribution du rôle (0: Nutriments, 1: Attaque, 2: Spread)
+                    role = index % 3 
+
+                    # 3. Mise à jour ou création de la cible
+                    if spore.id not in self.exploration_targets:
+                        target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets, mode=role)
                         self.exploration_targets[spore.id] = target
-                
+                    else:
+                        target = self.exploration_targets[spore.id]
+                        # Si cible atteinte ou presque, on change
+                        if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
+                            target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets, mode=role)
+                            self.exploration_targets[spore.id] = target
 
+                    # 4. Calcul du mouvement "Anti-Retour" et "Faible Coût"
+                    options = [Position(x=1, y=0), Position(x=-1, y=0), Position(x=0, y=1), Position(x=0, y=-1)]
+                    best_step = None
+                    min_step_score = float('inf')
+                    last_pos = self.last_positions.get(spore.id)
 
-                target = self.exploration_targets[spore.id]
+                    for opt in options:
+                        nx, ny = spore.position.x + opt.x, spore.position.y + opt.y
+                        
+                        if not (0 <= nx < game_map.width and 0 <= ny < game_map.height):
+                            continue
 
-                # Calcul de la direction (Vecteur)
-                diff_x = target.x - spore.position.x
-                diff_y = target.y - spore.position.y
+                        # Sécurité Anti-Retour
+                        if last_pos and nx == last_pos.x and ny == last_pos.y:
+                            continue 
 
-                # On choisit l'axe où l'écart est le plus grand
-                move_dir = Position(x=0, y=0)
-                if abs(diff_x) >= abs(diff_y) and diff_x != 0:
-                    move_dir = Position(x=1 if diff_x > 0 else -1, y=0)
-                elif diff_y != 0:
-                    move_dir = Position(x=0, y=1 if diff_y > 0 else -1)
+                        cell_biomass = game_message.world.biomassGrid[ny][nx]
+                        cell_owner = game_message.world.ownershipGrid[ny][nx]
+                        
+                        # On favorise les cases qui nous appartiennent ou les cases neutres vides
+                        step_cost = cell_biomass if cell_owner != game_message.yourTeamId else 0
+                        dist_to_target = abs(nx - target.x) + abs(ny - target.y)
 
-                # --- VERIFICATION DU CHEMIN (Le "propre path") ---
-                # Si la case devant nous est un mur trop cher, on essaie l'autre axe
-                next_pos_x = spore.position.x + move_dir.x
-                next_pos_y = spore.position.y + move_dir.y
+                        # Score du pas : Priorité énorme à éviter les grosses biomasses
+                        # (step_cost * 100) assure qu'on contourne un mur plutôt que de le traverser
+                        current_score = (step_cost * 100) + dist_to_target
 
-                target_biomass = game_message.world.biomassGrid[next_pos_y][next_pos_x]
-                target_owner = game_message.world.ownershipGrid[next_pos_y][next_pos_x]
+                        if current_score < min_step_score:
+                            min_step_score = current_score
+                            best_step = opt
 
-                # Si la case est occupée par un ennemi plus fort que nous, on change d'axe
-                if target_owner != game_message.yourTeamId and target_biomass >= spore.biomass:
-                    # On tente l'autre direction (si on allait en X, on tente Y et inversement)
-                    if move_dir.x != 0: # On allait horizontalement
-                        move_dir = Position(x=0, y=1 if diff_y >= 0 else -1)
-                    else: # On allait verticalement
-                        move_dir = Position(x=1 if diff_x >= 0 else -1, y=0)
-
-                actions.append(SporeMoveAction(sporeId=spore.id, direction=move_dir))
-                
-                # Move towards target
-                """actions.append(
-
-                    SporeMoveToAction(
-                        sporeId=spore.id,
-                        position=target
-                    )
-                )"""
-                #print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
+                    # 5. Exécution du mouvement
+                    if best_step:
+                        self.last_positions[spore.id] = Position(x=spore.position.x, y=spore.position.y)
+                        actions.append(SporeMoveAction(sporeId=spore.id, direction=best_step))
 
         
 
@@ -208,38 +202,56 @@ class Bot:
             
         return True
     
-    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict, force_neutral: bool = False) -> Position:
+    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict, mode: int = 0) -> Position:
         best_score = -float('inf')
         best_position = spore.position 
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        for _ in range(200): # On augmente le scan pour trouver des zones vierges loin
+        for _ in range(200):
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
-            
             if (x, y) in taken_positions: continue
 
-            # Lecture correcte [y][x]
             target_biomass = world.biomassGrid[y][x]
             target_owner = world.ownershipGrid[y][x]
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
+            
+            is_enemy = (target_owner != -1 and target_owner != spore.teamId)
+            is_neutral = (target_owner == -1)
 
-            if force_neutral:
-                # --- LOGIQUE SPREAD AGGRESSIF ---
-                # On ignore tout ce qui n'est pas neutre ET vide
-                if target_owner != -1 or target_biomass > 0:
-                    continue
+            # --- LOGIQUE DE COÛT ---
+            # Si c'est à nous, coût = 0. Si c'est vide, coût = 1. Si ennemi, coût = biomasse + 1.
+            cost = 0 if target_owner == spore.teamId else (target_biomass + 1)
+
+            # --- MODE ATTAQUE OPTIMISÉ (Cibles faibles) ---
+            if mode == 1: # Mode Attaque
+                if not is_enemy: continue
                 
-                # Ici, on inverse la distance : on veut aller LOIN (mais pas trop pour ne pas mourir)
-                # On donne un bonus fixe énorme car c'est neutre
-                score = 5000 + (distance * 2) 
+                # Priorité : Nutriments élevés / Coût faible
+                # On ajoute +1 au coût pour éviter la division par zéro
+                score = (nutrients * 1000) / (cost + 1)
+                
+                # Bonus pour les "petites" proies (on veut spread sur ses traces faibles)
+                if target_biomass <= 2:
+                    score += 500
+                    
+                score -= (distance * 5)
+
+            # --- MODE SPREAD (Terrain Neutre) ---
+            elif mode == 2:
+                if not is_neutral: continue
+                # On cherche les cases vides les moins chères (biomasse neutre 0)
+                score = 2000 - (cost * 100) - (distance * 10)
+
+            # --- MODE NUTRIMENTS (Classique) ---
             else:
-                # --- LOGIQUE NUTRIMENTS ---
-                if target_owner != spore.teamId and target_biomass >= (spore.biomass * 0.3):
-                    continue
-                
-                score = (nutrients * 1000) - (distance * 15)
+                # On cherche le meilleur rendement
+                score = (nutrients * 1000) - (cost * 200) - (distance * 10)
+
+            # SÉCURITÉ : Ne jamais cibler ce qu'on ne peut pas détruire
+            if target_owner != spore.teamId and target_biomass >= spore.biomass:
+                continue
 
             if score > best_score:
                 best_score = score
