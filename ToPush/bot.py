@@ -42,24 +42,26 @@ class Bot:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
             self.spawner_created = True
             print(f"Tick {game_message.tick}: Creating spawner")
-        elif game_message.tick % 300 == 0:
+        elif game_message.tick % 100 == 0:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-2].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
             if my_team.nutrients >= 10:
                 for spawner in my_team.spawners:
-                    actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=10)
-                    )
+                    if my_team.nutrients >= 100:
+                        actions.append(
+                            SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=25)
+                        )
+                    elif my_team.nutrients >= 50:
+                        actions.append(
+                            SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=10)
+                        )
+                    else:
+                        actions.append(
+                            SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=5)
+                        )
                     break  # Produce one at a time
-            if my_team.nutrients >= 100:
-                for spawner in my_team.spawners:
-                    actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=50)
-                    )
-                    break  # Produce one at a time
-            
         
         # Step 3: Move all spores to explore the map
         if game_message.tick > 200 and len(my_team.spores) > 10:
