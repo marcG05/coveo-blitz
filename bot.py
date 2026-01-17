@@ -167,57 +167,42 @@ class Bot:
         return True
     
     def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict) -> Position:
-        best_score = -1
+        best_score = -float('inf')
         best_position = Position(x=random.randint(0, game_map.width - 1), y=random.randint(0, game_map.height - 1))
         
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        # On teste plus de positions pour trouver la perle rare
-        for _ in range(40):
+        for _ in range(50): # On augmente le nombre d'échantillons pour trouver la tuile la plus faible
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            # 1. Éviter les doublons
-            if (x, y) in taken_positions:
+            if (x, y) in taken_positions: 
                 continue
 
-            # 2. Vérifier la biomasse sur la case (y, x)
-            # On évite les cases avec trop de biomasse (> 20) car ce sont des obstacles/ennemis
-            cell_biomass = world.biomassGrid[x][y]
-            if cell_biomass > 20:
-                continue
-                
-            # 3. Calculer l'intérêt de la case
-            nutrients = game_map.nutrientGrid[x][y]
-            owner = world.ownershipGrid[x][y]
+            target_biomass = world.biomassGrid[y][x]
+            target_owner = world.ownershipGrid[y][x]
+            nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
+
+            # --- LOGIQUE : CHERCHER LA BIOMASSE LA PLUS PETITE ---
+            # 1. On commence avec les nutriments
+            score = nutrients * 10 
             
-            # --- LOGIQUE DE SCORE ---
-            score = nutrients * 4  # Priorité absolue aux nutriments
-            
-            # Si la case est vide (biomass == 0), elle est très intéressante à coloniser
-            if cell_biomass == 0:
-                score += 15
+            # 2. On pénalise lourdement la biomasse présente (sauf si c'est la nôtre)
+            if target_owner != spore.teamId:
+                # Plus target_biomass est grand, plus on retire de points au score
+                # On utilise un multiplicateur fort pour que la biomasse soit le critère décisif
+                score -= (target_biomass * 15) 
                 
-            # Si la case n'est pas à nous, bonus de conquête
-            if owner != spore.teamId:
-                score += 10
-                
-            # Pénalité de distance (on préfère ce qui est proche)
-            score -= distance * 1.5
-            
-            # --- VERIFICATION DE PROXIMITÉ (Sécurité Joueur) ---
-            # On baisse le score si un gros ennemi est juste à côté de cette cible
-            is_risky = False
-            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < game_map.width and 0 <= ny < game_map.height:
-                    if world.ownershipGrid[nx][ny] != spore.teamId and world.biomassGrid[nx][ny] > 15:
-                        is_risky = True
-                        break
-            
-            if is_risky:
-                score -= 50 # Grosse pénalité si c'est dangereux
+                # Sécurité absolue : Si on ne peut pas gagner le combat, on ignore
+                if target_biomass >= spore.biomass:
+                    continue
+            else:
+                # Bonus si la case nous appartient déjà (mouvement gratuit)
+                score += 20
+
+            # 3. Pénalité de distance pour rester efficace
+            score -= distance * 2
 
             if score > best_score:
                 best_score = score
