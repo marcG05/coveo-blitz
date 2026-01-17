@@ -7,6 +7,7 @@ class Bot:
         print("Initializing your super mega duper bot")
         self.exploration_targets = {}  # Track where each spore is heading
         self.spawner_created = False
+        use_spores_list = []
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
@@ -27,7 +28,7 @@ class Bot:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-5].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
-        elif len(my_team.spawners) > 0 and len(my_team.spores) < 5:
+        elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
             if my_team.nutrients >= 20:
                 for spawner in my_team.spawners:
@@ -38,7 +39,15 @@ class Bot:
                     break  # Produce one at a time
         
         # Step 3: Move all spores to explore the map
-        for spore in my_team.spores:
+        if len(my_team.spores) > 4:
+            use_spores_list = my_team.spores[1:]
+            actions.append(
+                SporeSplitAction(my_team.spores[0], my_team.spores[0].biomass*0.3, Position(0,1))
+            )
+        else:
+            use_spores_list = my_team.spores
+
+        for spore in use_spores_list:
             # Check if spore reached its target or doesn't have one
             if spore.id not in self.exploration_targets:
                 # Assign a new exploration target
