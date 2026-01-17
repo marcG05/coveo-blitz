@@ -16,8 +16,7 @@ from game_message import TeamGameState
 
 
 async def run():
-    # Use environment variable for server URI, default to local test server
-    uri = os.environ.get("GAME_SERVER_URI", "ws://127.0.0.1:8765")
+    uri = "ws://127.0.0.1:8765"
 
     async with connect(uri, max_size=None) as websocket:
         bot = Bot()
