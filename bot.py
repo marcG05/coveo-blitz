@@ -7,7 +7,10 @@ class Bot:
         print("Initializing your super mega duper bot")
         self.exploration_targets = {}  # Track where each spore is heading
         self.spawner_created = False
-        use_spores_list = []
+        self.defense_list : list[Spore] = []
+        self.defense_list_id : list[str] = []
+        self.highestSpore : Spore = None
+        self.newDefensePosition : Position = None
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
@@ -17,6 +20,10 @@ class Bot:
         my_team: TeamInfo = game_message.world.teamInfos[game_message.yourTeamId]
         game_map = game_message.world.map
         
+        for s in self.defense_list:
+            print(f"DEFENCE : {s.id}")
+
+        
         # Strategy: Create one spawner, then produce spores and explore the map
         
         # Step 1: Create initial spawner if we don't have one
@@ -25,7 +32,7 @@ class Bot:
             self.spawner_created = True
             print(f"Tick {game_message.tick}: Creating spawner")
         elif game_message.tick % 200 == 0:
-            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-5].id))
+            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-1].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
@@ -39,15 +46,37 @@ class Bot:
                     break  # Produce one at a time
         
         # Step 3: Move all spores to explore the map
-        if len(my_team.spores) > 4:
-            use_spores_list = my_team.spores[1:]
-            actions.append(
-                SporeSplitAction(my_team.spores[0], my_team.spores[0].biomass*0.3, Position(0,1))
-            )
-        else:
+        """if len(my_team.spores) - len(self.defense_list_id) > 4 and self.highestSpore != None:
             use_spores_list = my_team.spores
+            print(self.highestSpore)
+            actions.append(
+                SporeSplitAction(self.highestSpore.id, int(self.highestSpore.biomass*0.3), Position(0,1))
+            )
+            self.defense_list_id.append(self.highestSpore.id)
+        else:
+            use_spores_list = my_team.spores"""
+        if(self.highestSpore != None) and len(my_team.spores) > 4:
+            actions.append(SporeSplitAction(self.highestSpore.id, int(self.highestSpore.biomass * 0.4), Position(0,1)))
+            print("SPLITTING ACTIONS")
 
-        for spore in use_spores_list:
+        highBio = 0
+        for spore in my_team.spores:
+
+            if spore.id in self.defense_list_id:
+                continue
+
+            if spore.biomass >  20:
+                p = Position(1,0)
+                if(spore.position.x == 0):
+                    p.x = -1
+                if(spore.position.x == game_map.width):
+                    p.x = 1
+                actions.append(SporeSplitAction(spore.id, 10, Position(0,1)))
+                #continue
+
+            if spore.biomass > highBio:
+                highBio = spore.biomass
+                self.highestSpore = spore
             # Check if spore reached its target or doesn't have one
             if spore.id not in self.exploration_targets:
                 # Assign a new exploration target
