@@ -52,8 +52,14 @@ class Bot:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=10)
                     )
-                    print(f"Tick {game_message.tick}: Producing spore from spawner")
                     break  # Produce one at a time
+            if my_team.nutrients >= 100:
+                for spawner in my_team.spawners:
+                    actions.append(
+                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=50)
+                    )
+                    break  # Produce one at a time
+            
         
         # Step 3: Move all spores to explore the map
         if game_message.tick > 200 and len(my_team.spores) > 10:
@@ -93,6 +99,33 @@ class Bot:
 
         highBio = 0
         
+        # NOUVELLE STRATÉGIE: COMBINAISON MASSIVE - Tous les spores vers UNE cible
+        # Exécuter cela AVANT tout le reste pour maximiser les combinaisons
+        if self.state in [CONVERING, LISTSPORE]:
+            global_target = self._find_best_global_target(my_team.spores, game_map, game_message.world, my_team.teamId, alreadyPlayed_id)
+            
+            if global_target:
+                spores_sent = 0
+                for spore in my_team.spores:
+                    if spore.id not in alreadyPlayed_id and spore.id not in self.defense_list_id:
+                        # Vérifier si la spore est déjà à la cible
+                        distance_to_target = abs(spore.position.x - global_target.x) + abs(spore.position.y - global_target.y)
+                        
+                        # Si déjà à la cible (dans un rayon de 2), ne pas envoyer d'action
+                        # La spore restera là et se combinera naturellement avec les autres
+                        if distance_to_target <= 2:
+                            alreadyPlayed_id.append(spore.id)
+                            continue
+                        
+                        # TOUS LES SPORES - Aucune limite de biomasse!
+                        actions.append(SporeMoveToAction(sporeId=spore.id, position=global_target))
+                        alreadyPlayed_id.append(spore.id)
+                        spores_sent += 1
+                
+                if spores_sent > 0:
+                    total_biomass = sum(s.biomass for s in my_team.spores if s.id in alreadyPlayed_id[-spores_sent:] if s.id in [sp.id for sp in my_team.spores])
+                    print(f"Tick {game_message.tick}: 🔥 FULL SWARM - {spores_sent} spores moving → {global_target}")
+        
         # CORRECTION: Une seule boucle pour traiter chaque spore UNE FOIS
         for index, spore in enumerate(my_team.spores):
             # Skip si déjà traité
@@ -101,9 +134,9 @@ class Bot:
 
             # 1. Gestion du Split (Expansion) - PRIORITÉ #1
             # Split plus agressif pour expansion rapide
-            if spore.biomass > 25:
+            if spore.biomass > 30:  # Augmenté de 25 à 30 pour permettre plus de combinaisons
                 valid_dir = self.get_valid_direction(spore, game_map)
-                actions.append(SporeSplitAction(spore.id, 12, valid_dir))
+                actions.append(SporeSplitAction(spore.id, 15, valid_dir))  # Split plus gros
                 alreadyPlayed_id.append(spore.id)  # Marquer comme traité
                 continue
 
@@ -143,6 +176,125 @@ class Bot:
 
         print(f"STATE {self.state}")
         return actions
+    
+    def _find_best_global_target(self, spores: list[Spore], game_map: GameMap, world: GameWorld, team_id: int, already_played: list[str]) -> Position:
+        """
+        Trouve LA MEILLEURE cible pour combiner TOUS LES SPORES ensemble
+        """
+        # TOUS les spores disponibles - AUCUNE LIMITE!
+        available_spores = [s for s in spores if s.id not in already_played]
+        
+        # Protection contre division par zéro
+        if len(available_spores) < 1:
+            return None
+        
+        # Biomasse totale MASSIVE
+        total_biomass = sum(s.biomass for s in available_spores)
+        
+        # Protection supplémentaire
+        if len(available_spores) == 0:
+            return None
+        
+        # Centre de masse
+        avg_x = sum(s.position.x for s in available_spores) / len(available_spores)
+        avg_y = sum(s.position.y for s in available_spores) / len(available_spores)
+        
+        best_score = -float('inf')
+        best_target = None
+        
+        # Scanner TOUTE la carte
+        for y in range(game_map.height):
+            for x in range(game_map.width):
+                nutrients = game_map.nutrientGrid[y][x]
+                target_biomass = world.biomassGrid[y][x]
+                target_owner = world.ownershipGrid[y][x]
+                
+                is_enemy = target_owner != -1 and target_owner != team_id
+                is_ours = target_owner == team_id
+                
+                # Filtres basiques
+                if is_ours and nutrients == 0:
+                    continue
+                
+                # Réduire le seuil de nutriments pour trouver plus de cibles
+                if nutrients < 3:  # Réduit de 5 à 3 - ENCORE PLUS DE CIBLES
+                    continue
+                
+                # Vérifier si beaucoup de nos spores sont déjà à cette position
+                spores_already_here = sum(1 for s in available_spores if abs(s.position.x - x) <= 2 and abs(s.position.y - y) <= 2)
+                
+                # Si 3+ spores sont déjà là, chercher une nouvelle cible
+                if spores_already_here >= 3:
+                    continue
+                
+                # Avec une armée massive, on peut prendre N'IMPORTE QUOI
+                # Pas de limite de biomasse si on a assez de force combinée
+                if is_enemy and target_biomass >= total_biomass * 0.8:  # On peut prendre jusqu'à 80% de notre force
+                    continue
+                
+                # Distance moyenne
+                if len(available_spores) == 0:
+                    continue
+                    
+                avg_distance = sum(abs(s.position.x - x) + abs(s.position.y - y) for s in available_spores) / len(available_spores)
+                
+                # Augmenter la portée pour trouver plus de cibles
+                if avg_distance > 40:  # Augmenté de 35 à 40
+                    continue
+                
+                # Vérifier murs (simplifié)
+                wall_count = 0
+                for i in range(1, 4):  # Réduit de 6 à 4 pour moins de strictness
+                    ratio = i / 4
+                    check_x = int(avg_x + (x - avg_x) * ratio)
+                    check_y = int(avg_y + (y - avg_y) * ratio)
+                    
+                    if 0 <= check_x < game_map.width and 0 <= check_y < game_map.height:
+                        biomass = world.biomassGrid[check_y][check_x]
+                        owner = world.ownershipGrid[check_y][check_x]
+                        if owner != team_id and biomass >= 70:  # Augmenté de 60 à 70
+                            wall_count += 1
+                
+                # Permettre plus de murs
+                if wall_count > 12:  # Augmenté de 8 à 12
+                    continue
+                
+                # SCORE: Nutriments / Distance
+                nutrient_value = nutrients * 100
+                capture_cost = target_biomass if is_enemy else 1
+                
+                # Protection contre division par zéro
+                if capture_cost <= 0:
+                    capture_cost = 1
+                
+                roi = nutrient_value / capture_cost
+                score = roi / (avg_distance + 1)
+                
+                # BONUS encore plus agressifs
+                if nutrients >= 20:
+                    score *= 8  # Augmenté de 5 à 8
+                elif nutrients >= 15:
+                    score *= 5  # Augmenté de 3 à 5
+                elif nutrients >= 10:
+                    score *= 3  # Augmenté de 2 à 3
+                elif nutrients >= 7:
+                    score *= 1.5  # Nouveau bonus
+                
+                # BONUS pour proximité
+                if avg_distance <= 20:  # Augmenté de 15 à 20
+                    score *= 2  # Augmenté de 1.8 à 2
+                
+                # Pénalité murs réduite
+                score -= wall_count * 30  # Réduit de 50 à 30
+                
+                if score > best_score:
+                    best_score = score
+                    best_target = Position(x=x, y=y)
+        
+        if best_target:
+            print(f"🎯 ULTIMATE TARGET: {best_target} - ALL {len(available_spores)} spores combining! Total biomass: {total_biomass}")
+        
+        return best_target
     
     def is_direction_safe(self, current_pos: Position, direction: Position, world: GameWorld, my_team_id: int) -> bool:
         target_x = current_pos.x + direction.x

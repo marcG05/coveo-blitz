@@ -52,8 +52,14 @@ class Bot:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=10)
                     )
-                    print(f"Tick {game_message.tick}: Producing spore from spawner")
                     break  # Produce one at a time
+            if my_team.nutrients >= 100:
+                for spawner in my_team.spawners:
+                    actions.append(
+                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=50)
+                    )
+                    break  # Produce one at a time
+            
         
         # Step 3: Move all spores to explore the map
         if game_message.tick > 200 and len(my_team.spores) > 10:
