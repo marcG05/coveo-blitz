@@ -42,7 +42,7 @@ class Bot:
             self.spawner_created = True
             print(f"Tick {game_message.tick}: Creating spawner")
         elif game_message.tick % 100 == 0:
-            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
+            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-2].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
