@@ -213,46 +213,40 @@ class Bot:
         best_position = spore.position 
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        for _ in range(150):
+        for _ in range(200): # On augmente le scan pour trouver des zones vierges loin
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            if (x, y) in taken_positions:
-                continue
+            if (x, y) in taken_positions: continue
 
+            # Lecture correcte [y][x]
             target_biomass = world.biomassGrid[y][x]
             target_owner = world.ownershipGrid[y][x]
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
-            is_mine = (target_owner == spore.teamId)
 
-            # --- FILTRE DE SÉCURITÉ ANTI-GASPILLAGE ---
-            if not is_mine:
-                # RÈGLE 1 : Si la biomasse ennemie est >= à la nôtre, on meurt à l'arrivée. INTERDIT.
-                if target_biomass >= spore.biomass:
+            if force_neutral:
+                # --- LOGIQUE SPREAD AGGRESSIF ---
+                # On ignore tout ce qui n'est pas neutre ET vide
+                if target_owner != -1 or target_biomass > 0:
                     continue
                 
-                # RÈGLE 2 : On refuse de perdre plus de 30% de notre biomasse pour une seule case
-                # (Ajuste ce 0.3 si tu veux être plus ou moins agressif)
-                cost_to_capture = 1 + target_biomass
-                if cost_to_capture > (spore.biomass * 0.3):
-                    continue
-
-            # --- CALCUL DU SCORE ---
-            if force_neutral:
-                if target_biomass > 0 or is_mine:
-                    continue
-                score = 1000 - (distance * 10)
+                # Ici, on inverse la distance : on veut aller LOIN (mais pas trop pour ne pas mourir)
+                # On donne un bonus fixe énorme car c'est neutre
+                score = 5000 + (distance * 2) 
             else:
-                # On favorise les nutriments, mais on soustrait le coût pour préférer les cibles faciles
-                score = (nutrients * 1000) - (target_biomass * 100) - (distance * 5)
+                # --- LOGIQUE NUTRIMENTS ---
+                if target_owner != spore.teamId and target_biomass >= (spore.biomass * 0.3):
+                    continue
+                
+                score = (nutrients * 1000) - (distance * 15)
 
             if score > best_score:
                 best_score = score
                 best_position = Position(x=x, y=y)
                     
         return best_position
-    
+        
     def get_valid_direction(self, spore: Spore, game_map: GameMap) -> Position:
         # 1. Définir les 4 directions possibles (CARDINALES uniquement)
         # x et y ne peuvent être que -1, 0 ou 1
