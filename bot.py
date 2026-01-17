@@ -41,8 +41,8 @@ class Bot:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
             self.spawner_created = True
             print(f"Tick {game_message.tick}: Creating spawner")
-        elif game_message.tick % 200 == 0:
-            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-1].id))
+        elif game_message.tick % 100 == 0:
+            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
@@ -102,7 +102,7 @@ class Bot:
             if spore.id in alreadyPlayed_id:
                 continue
 
-            if spore.biomass >  30:
+            if spore.biomass >  20:
                 valid_dir = self.get_valid_direction(spore, game_map)
                 actions.append(SporeSplitAction(spore.id, 10, valid_dir))
                 #self.defense_list_id.append(spore.id)                
@@ -143,36 +143,60 @@ class Bot:
         print(f"STATE {self.state}")
         return actions
     
+    def is_direction_safe(self, current_pos: Position, direction: Position, world: GameWorld, my_team_id: int) -> bool:
+        target_x = current_pos.x + direction.x
+        target_y = current_pos.y + direction.y
+        
+        # Vérifier les limites de la carte
+        if not (0 <= target_x < world.map.width and 0 <= target_y < world.map.height):
+            return False
+            
+        # Vérifier la biomasse et le propriétaire
+        # On évite si : Biomasse > 20 ET ce n'est pas à nous
+        cell_biomass = world.biomassGrid[target_y][target_x]
+        cell_owner = world.ownershipGrid[target_y][target_x]
+        
+        if cell_biomass > 20 and cell_owner != my_team_id:
+            return False
+            
+        return True
+    
     def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict) -> Position:
         best_score = -1
-        # On garde une position de secours au cas où
         best_position = Position(x=random.randint(0, game_map.width - 1), y=random.randint(0, game_map.height - 1))
-        
-        # On récupère les positions déjà ciblées par nos autres spores
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        for _ in range(15):  # On augmente un peu le nombre d'essais
+        for _ in range(30): # Plus d'essais pour trouver une zone sûre
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            # --- CONDITION : Si une autre spore y va déjà, on ignore cette case ---
             if (x, y) in taken_positions:
                 continue
-                
+
+            # --- NOUVEAU : VERIFIER LES ALENTOURS DE LA CIBLE ---
+            # On regarde si la cible n'est pas en plein milieu d'un groupe ennemi
+            is_area_dangerous = False
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0), (0,0)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < game_map.width and 0 <= ny < game_map.height:
+                    if world.ownershipGrid[ny][nx] != spore.teamId and world.biomassGrid[ny][nx] > 20:
+                        is_area_dangerous = True
+                        break
+            
+            if is_area_dangerous:
+                continue # On ignore cette cible, trop risquée
+
+            # Calcul classique du score
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
-            owner = world.ownershipGrid[y][x]
             
-            score = nutrients * 2
+            score = nutrients * 3 # On priorise encore plus les nutriments
             score -= distance * 0.5
-            
-            if owner != spore.teamId:
-                score += 5
             
             if score > best_score:
                 best_score = score
                 best_position = Position(x=x, y=y)
-                
+                    
         return best_position
     
     def get_valid_direction(self, spore: Spore, game_map: GameMap) -> Position:
