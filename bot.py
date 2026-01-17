@@ -41,8 +41,8 @@ class Bot:
         if len(my_team.spawners) == 0 and len(my_team.spores) > 0:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[0].id))
             self.spawner_created = True
-            print(f"Tick {game_message.tick}: Creating spawner")
-        elif game_message.tick % 100 == 0:
+            print(f"Tick {game_message.tick}: Creating spawner")   
+        elif game_message.tick % 300 == 0 and len(my_team.spawners) < 5:
             actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-2].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
@@ -104,6 +104,9 @@ class Bot:
 
         highBio = 0
         for index, spore in enumerate(my_team.spores):
+
+            if game_map.nutrientGrid[spore.position.y][spore.position.x] > 0 and not self.spawner_exists_at(spore.position.y, spore.position.x, game_message.world):
+                actions.append(SporeCreateSpawnerAction(spore.id))
 
             if spore.id in alreadyPlayed_id:
                 continue
@@ -282,3 +285,9 @@ class Bot:
                 return d  # Retourne la première direction valide trouvée
                 
         return Position(0, 0) # Sécurité : ne bouge pas si aucune option
+
+    def spawner_exists_at(self, y: int, x: int, world: GameWorld) -> bool:
+        for spawner in world.spawners:
+            if spawner.position.y == y and spawner.position.x == x:
+                return True
+        return False
