@@ -55,10 +55,10 @@ class Bot:
                 if g.teamId != my_team.teamId:
                     spawn_pos = g.position
                     break
-            if spawn == None:
+            if spawn_pos == None:
                     for g in game_message.world.spores:
                         if g.teamId != my_team.teamId:
-                            spawn = g.position
+                            spawn_pos = g.position
                             break
             
             if spawn_pos:
