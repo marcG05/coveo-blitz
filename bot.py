@@ -7,12 +7,15 @@ class Bot:
         print("Initializing your super mega duper bot")
         self.exploration_targets = {}  # Track where each spore is heading
         self.spawner_created = False
-        use_spores_list = []
+        self.defenseSpore : Spore = None
+        self.defense_spores : list[Spore] = []
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
         Starter bot that moves spores across the map to explore and claim territory.
         """
+        use_spores_list : list[Spore] = []
+        
         actions = []
         my_team: TeamInfo = game_message.world.teamInfos[game_message.yourTeamId]
         game_map = game_message.world.map
@@ -25,12 +28,12 @@ class Bot:
             self.spawner_created = True
             print(f"Tick {game_message.tick}: Creating spawner")
         elif game_message.tick % 200 == 0:
-            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-5].id))
+            actions.append(SporeCreateSpawnerAction(sporeId=my_team.spores[-1].id))
         
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
-            if my_team.nutrients >= 20:
+            if my_team.nutrients >= 20 and game_message.tick % 25 == 0:
                 for spawner in my_team.spawners:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=20)
@@ -39,16 +42,31 @@ class Bot:
                     break  # Produce one at a time
         
         # Step 3: Move all spores to explore the map
-        if len(my_team.spores) > 4:
-            use_spores_list = my_team.spores[1:]
-            multipler = game_message.tick // 100
+        if len(my_team.spores) > 4 and self.defenseSpore != None:
+            use_spores_list = my_team.spores
+            multipler = 0.3
             actions.append(
-                SporeSplitAction(my_team.spores[0], my_team.spores[0].biomass*0.3, Position(0,1))
+                SporeSplitAction(self.defenseSpore.id, int(self.defenseSpore.biomass*multipler), Position(0,1))
             )
+            if my_team.spores[-1] not in self.defense_spores:
+                self.defense_spores.append(my_team.spores[-1])
+
         else:
             use_spores_list = my_team.spores
 
+        #bouger spore
+        highSpore = 0
         for spore in use_spores_list:
+            if spore == self.defenseSpore:
+                print("HIGHEST SPORE : IGNORED")
+                continue
+            if spore in self.defense_spores:
+                print("DEFENSE SPORE : IGNORED")
+                continue
+
+            if spore.biomass > highSpore:
+                highSpore = spore.biomass
+                self.defenseSpore = spore
             # Check if spore reached its target or doesn't have one
             if spore.id not in self.exploration_targets:
                 # Assign a new exploration target
@@ -70,6 +88,9 @@ class Bot:
                 )
             )
             print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
+
+        
+
         
         return actions
     
