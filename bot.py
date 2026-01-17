@@ -2,6 +2,11 @@ import random
 from game_message import *
 
 
+CONVERING = 0
+ATTACK = 1
+DEFEND = 2
+LISTSPORE = 3
+
 class Bot:
     def __init__(self):
         print("Initializing your super mega duper bot")
@@ -11,6 +16,8 @@ class Bot:
         self.defense_list_id : list[str] = []
         self.highestSpore : Spore = None
         self.newDefensePosition : Position = None
+        self.tenHighest : list[str] = []
+        self.state = CONVERING
 
     def get_next_move(self, game_message: TeamGameState) -> list[Action]:
         """
@@ -21,6 +28,7 @@ class Bot:
         actions = []
         my_team: TeamInfo = game_message.world.teamInfos[game_message.yourTeamId]
         game_map = game_message.world.map
+        alreadyPlayed_id : list[str] = []
         
         for s in self.defense_list:
             print(f"DEFENCE : {s.id}")
@@ -39,7 +47,7 @@ class Bot:
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
-            if my_team.nutrients >= 20 and game_message.tick % 25 == 0:
+            if my_team.nutrients >= 20:
                 for spawner in my_team.spawners:
                     actions.append(
                         SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=20)
@@ -57,91 +65,136 @@ class Bot:
             self.defense_list_id.append(self.highestSpore.id)
         else:
             use_spores_list = my_team.spores"""
-        if(self.highestSpore != None) and len(my_team.spores) > 4:
-            actions.append(SporeSplitAction(self.highestSpore.id, int(self.highestSpore.biomass * 0.4), Position(0,1)))
-            print("SPLITTING ACTIONS")
+
+        if game_message.tick > 200 and len(my_team.spores) > 10:
+            self.state = ATTACK
+            temp_list = list(my_team.spores) # Work on a copy
+            result = []
+            for _ in range(4):
+                current_max = temp_list[0]
+                for val in temp_list:
+                    if val.biomass > current_max.biomass:
+                        current_max = val
+                result.append(current_max)
+                temp_list.remove(current_max)
+                spawn = None
+                for g in game_message.world.spores:
+                    if g.teamId != my_team.teamId:
+                        spawn = g.position
+                        break
+                
+                print(f"ATTACK AT POS {spawn}")
+                for r in result:
+                    actions.append(
+                    SporeMoveToAction(
+                        sporeId=r.id,
+                        position=spawn
+                    )
+                    )
+                    alreadyPlayed_id.append(r.id)
+        
+        if len(my_team.spores) > 5:
+            self.state = LISTSPORE
 
         highBio = 0
         for spore in my_team.spores:
 
-            if spore.id in self.defense_list_id:
+            if spore.id in alreadyPlayed_id:
                 continue
 
-            if spore.biomass >  20:
-                p = Position(1,0)
-                if(spore.position.x == 0):
-                    p.x = -1
-                if(spore.position.x == game_map.width):
-                    p.x = 1
-                actions.append(SporeSplitAction(spore.id, 10, Position(0,1)))
-                #continue
+            if spore.biomass >  30:
+                valid_dir = self.get_valid_direction(spore, game_map)
+                actions.append(SporeSplitAction(spore.id, 10, valid_dir))
+                #self.defense_list_id.append(spore.id)                
+                continue
 
             if spore.biomass > highBio:
                 highBio = spore.biomass
                 self.highestSpore = spore
-            # Check if spore reached its target or doesn't have one
-            if spore.id not in self.exploration_targets:
-                # Assign a new exploration target
-                target = self._get_exploration_target(spore, game_map, game_message.world)
-                self.exploration_targets[spore.id] = target
-            else:
-                target = self.exploration_targets[spore.id]
-                # Check if we reached the target (within 1 tile)
-                if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
-                    # Get a new target
-                    target = self._get_exploration_target(spore, game_map, game_message.world)
+
+            if self.state == CONVERING:
+                if spore.id in self.defense_list_id:
+                    continue
+                # Check if spore reached its target or doesn't have one
+                if spore.id not in self.exploration_targets:
+                    # Assign a new exploration target
+                    target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets)
                     self.exploration_targets[spore.id] = target
-            
-            # Move towards target
-            actions.append(
-                SporeMoveToAction(
-                    sporeId=spore.id,
-                    position=target
+                else:
+                    target = self.exploration_targets[spore.id]
+                    # Check if we reached the target (within 1 tile)
+                    if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
+                        # Get a new target
+                        target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets)
+                        self.exploration_targets[spore.id] = target
+                
+                # Move towards target
+                actions.append(
+
+                    SporeMoveToAction(
+                        sporeId=spore.id,
+                        position=target
+                    )
                 )
-            )
-            print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
+                #print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
 
         
 
-        
+        print(f"STATE {self.state}")
         return actions
     
-    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld) -> Position:
-        """
-        Get a strategic exploration target for the spore.
-        Prioritizes high-nutrient tiles and unexplored areas.
-        """
-        # Strategy: Look for high-nutrient tiles that are not owned by us
+    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict) -> Position:
         best_score = -1
-        best_position = Position(
-            x=random.randint(0, game_map.width - 1),
-            y=random.randint(0, game_map.height - 1)
-        )
+        # On garde une position de secours au cas où
+        best_position = Position(x=random.randint(0, game_map.width - 1), y=random.randint(0, game_map.height - 1))
         
-        # Sample random positions and pick the best one
-        for _ in range(10):
+        # On récupère les positions déjà ciblées par nos autres spores
+        taken_positions = [(p.x, p.y) for p in current_targets.values()]
+
+        for _ in range(15):  # On augmente un peu le nombre d'essais
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            # Calculate score based on:
-            # 1. Nutrient value of the tile
-            # 2. Distance from spore (prefer closer tiles)
-            # 3. Whether it's owned by another team (prefer neutral/enemy tiles)
-            
+            # --- CONDITION : Si une autre spore y va déjà, on ignore cette case ---
+            if (x, y) in taken_positions:
+                continue
+                
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
             owner = world.ownershipGrid[y][x]
             
-            # Score calculation
-            score = nutrients * 2  # Nutrients are important
-            score -= distance * 0.5  # Prefer closer tiles
+            score = nutrients * 2
+            score -= distance * 0.5
             
-            # Prefer tiles not owned by us
             if owner != spore.teamId:
                 score += 5
             
             if score > best_score:
                 best_score = score
                 best_position = Position(x=x, y=y)
-        
+                
         return best_position
+    
+    def get_valid_direction(self, spore: Spore, game_map: GameMap) -> Position:
+        # 1. Définir les 4 directions possibles (CARDINALES uniquement)
+        # x et y ne peuvent être que -1, 0 ou 1
+        possible_dirs = [
+            Position(0, -1), # Haut
+            Position(0, 1),  # Bas
+            Position(-1, 0), # Gauche
+            Position(1, 0)   # Droite
+        ]
+        
+        # Mélanger pour varier l'expansion
+        random.shuffle(possible_dirs)
+
+        for d in possible_dirs:
+            # 2. Calculer la position théorique
+            target_x = spore.position.x + d.x
+            target_y = spore.position.y + d.y
+            
+            # 3. Vérifier si on reste à l'intérieur de la grille
+            if 0 <= target_x < game_map.width and 0 <= target_y < game_map.height:
+                return d  # Retourne la première direction valide trouvée
+                
+        return Position(0, 0) # Sécurité : ne bouge pas si aucune option
