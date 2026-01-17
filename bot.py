@@ -102,7 +102,7 @@ class Bot:
             self.state = LISTSPORE
 
         highBio = 0
-        for spore in my_team.spores:
+        for index, spore in enumerate(my_team.spores):
 
             if spore.id in alreadyPlayed_id:
                 continue
@@ -117,30 +117,72 @@ class Bot:
                 highBio = spore.biomass
                 self.highestSpore = spore
 
-            if self.state == CONVERING:
+            if self.state == CONVERING: # (Note: Attention à l'orthographe "COVERING" ?)
                 if spore.id in self.defense_list_id:
                     continue
-                # Check if spore reached its target or doesn't have one
+                    
                 if spore.id not in self.exploration_targets:
-                    # Assign a new exploration target
-                    target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets)
+                    # LOGIQUE : Les 2 premières spores (index 0, 1) ciblent les nutriments.
+                    # À partir de la 3ème (index 2), on alterne : 1 sur 3 fait du spread neutre.
+                    is_colonizer = (index >= 6 and index % 3 == 0)
+                    
+                    target = self._get_exploration_target(
+                        spore, 
+                        game_map, 
+                        game_message.world, 
+                        self.exploration_targets, 
+                        force_neutral=is_colonizer
+                    )
                     self.exploration_targets[spore.id] = target
                 else:
                     target = self.exploration_targets[spore.id]
-                    # Check if we reached the target (within 1 tile)
+                    # Si on est arrivé (distance <= 1), on demande une nouvelle cible
                     if abs(spore.position.x - target.x) <= 1 and abs(spore.position.y - target.y) <= 1:
-                        # Get a new target
-                        target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets)
+                        is_colonizer = (index >= 6 and index % 3 == 0)
+                        target = self._get_exploration_target(spore, game_map, game_message.world, self.exploration_targets, force_neutral=is_colonizer)
                         self.exploration_targets[spore.id] = target
                 
+
+
+                target = self.exploration_targets[spore.id]
+
+                # Calcul de la direction (Vecteur)
+                diff_x = target.x - spore.position.x
+                diff_y = target.y - spore.position.y
+
+                # On choisit l'axe où l'écart est le plus grand
+                move_dir = Position(x=0, y=0)
+                if abs(diff_x) >= abs(diff_y) and diff_x != 0:
+                    move_dir = Position(x=1 if diff_x > 0 else -1, y=0)
+                elif diff_y != 0:
+                    move_dir = Position(x=0, y=1 if diff_y > 0 else -1)
+
+                # --- VERIFICATION DU CHEMIN (Le "propre path") ---
+                # Si la case devant nous est un mur trop cher, on essaie l'autre axe
+                next_pos_x = spore.position.x + move_dir.x
+                next_pos_y = spore.position.y + move_dir.y
+
+                target_biomass = game_message.world.biomassGrid[next_pos_y][next_pos_x]
+                target_owner = game_message.world.ownershipGrid[next_pos_y][next_pos_x]
+
+                # Si la case est occupée par un ennemi plus fort que nous, on change d'axe
+                if target_owner != game_message.yourTeamId and target_biomass >= spore.biomass:
+                    # On tente l'autre direction (si on allait en X, on tente Y et inversement)
+                    if move_dir.x != 0: # On allait horizontalement
+                        move_dir = Position(x=0, y=1 if diff_y >= 0 else -1)
+                    else: # On allait verticalement
+                        move_dir = Position(x=1 if diff_x >= 0 else -1, y=0)
+
+                actions.append(SporeMoveAction(sporeId=spore.id, direction=move_dir))
+                
                 # Move towards target
-                actions.append(
+                """actions.append(
 
                     SporeMoveToAction(
                         sporeId=spore.id,
                         position=target
                     )
-                )
+                )"""
                 #print(f"Tick {game_message.tick}: Moving spore {spore.id} to ({target.x}, {target.y})")
 
         
@@ -166,53 +208,49 @@ class Bot:
             
         return True
     
-    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict) -> Position:
+    def _get_exploration_target(self, spore: Spore, game_map: GameMap, world: GameWorld, current_targets: dict, force_neutral: bool = False) -> Position:
         best_score = -float('inf')
-        best_position = Position(x=random.randint(0, game_map.width - 1), y=random.randint(0, game_map.height - 1))
+        best_position = spore.position 
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        for _ in range(80):
+        for _ in range(150):
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
-            if (x, y) in taken_positions: continue
+            if (x, y) in taken_positions:
+                continue
 
             target_biomass = world.biomassGrid[y][x]
             target_owner = world.ownershipGrid[y][x]
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
+            is_mine = (target_owner == spore.teamId)
 
-            # --- DÉTECTION DE MUR / DANGER ---
-            # On regarde la biomasse autour de la cible (rayon de 1)
-            proximity_danger = 0
-            for dx in range(-1, 2):
-                for dy in range(-1, 2):
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < game_map.width and 0 <= ny < game_map.height:
-                        # Si c'est un ennemi ou neutre, on ajoute sa biomasse au danger
-                        if world.ownershipGrid[ny][nx] != spore.teamId:
-                            proximity_danger += world.biomassGrid[ny][nx]
+            # --- FILTRE DE SÉCURITÉ ANTI-GASPILLAGE ---
+            if not is_mine:
+                # RÈGLE 1 : Si la biomasse ennemie est >= à la nôtre, on meurt à l'arrivée. INTERDIT.
+                if target_biomass >= spore.biomass:
+                    continue
+                
+                # RÈGLE 2 : On refuse de perdre plus de 30% de notre biomasse pour une seule case
+                # (Ajuste ce 0.3 si tu veux être plus ou moins agressif)
+                cost_to_capture = 1 + target_biomass
+                if cost_to_capture > (spore.biomass * 0.3):
+                    continue
 
-            # --- CALCUL DU SCORE FINAL ---
-            # 1. Priorité massive aux nutriments
-            score = nutrients * 30 
-            
-            # 2. On pénalise le "Mur" : Si le danger total autour est > 20, on fuit
-            if proximity_danger > 20:
-                score -= (proximity_danger * 50) # Grosse pénalité pour les zones denses
-
-            # 3. On pénalise la biomasse directe sur la tuile
-            if target_owner != spore.teamId:
-                score -= (target_biomass * 40)
-                if target_biomass >= spore.biomass: continue # Sécurité survie
-            
-            # 4. Pénalité de distance légère
-            score -= distance * 1.5
+            # --- CALCUL DU SCORE ---
+            if force_neutral:
+                if target_biomass > 0 or is_mine:
+                    continue
+                score = 1000 - (distance * 10)
+            else:
+                # On favorise les nutriments, mais on soustrait le coût pour préférer les cibles faciles
+                score = (nutrients * 1000) - (target_biomass * 100) - (distance * 5)
 
             if score > best_score:
                 best_score = score
                 best_position = Position(x=x, y=y)
-                
+                    
         return best_position
     
     def get_valid_direction(self, spore: Spore, game_map: GameMap) -> Position:
