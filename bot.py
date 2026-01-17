@@ -41,6 +41,7 @@ class Bot:
         # Step 3: Move all spores to explore the map
         if len(my_team.spores) > 4:
             use_spores_list = my_team.spores[1:]
+            multipler = game_message.tick // 100
             actions.append(
                 SporeSplitAction(my_team.spores[0], my_team.spores[0].biomass*0.3, Position(0,1))
             )
