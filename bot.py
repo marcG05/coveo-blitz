@@ -47,10 +47,10 @@ class Bot:
         # Step 2: Produce new spores if we have nutrients and few spores
         elif len(my_team.spawners) > 0:
             # Only produce if we have enough nutrients
-            if my_team.nutrients >= 20:
+            if my_team.nutrients >= 10:
                 for spawner in my_team.spawners:
                     actions.append(
-                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=20)
+                        SpawnerProduceSporeAction(spawnerId=spawner.id, biomass=10)
                     )
                     print(f"Tick {game_message.tick}: Producing spore from spawner")
                     break  # Produce one at a time
@@ -172,7 +172,8 @@ class Bot:
         
         taken_positions = [(p.x, p.y) for p in current_targets.values()]
 
-        for _ in range(50): # On augmente le nombre d'échantillons pour trouver la tuile la plus faible
+        # On échantillonne beaucoup de cases pour trouver les meilleures opportunités d'étalement
+        for _ in range(60):
             x = random.randint(0, game_map.width - 1)
             y = random.randint(0, game_map.height - 1)
             
@@ -184,25 +185,29 @@ class Bot:
             nutrients = game_map.nutrientGrid[y][x]
             distance = abs(spore.position.x - x) + abs(spore.position.y - y)
 
-            # --- LOGIQUE : CHERCHER LA BIOMASSE LA PLUS PETITE ---
-            # 1. On commence avec les nutriments
-            score = nutrients * 10 
-            
-            # 2. On pénalise lourdement la biomasse présente (sauf si c'est la nôtre)
+            # --- LOGIQUE DE SPREAD (EXPANSION) ---
+            score = nutrients * 5 # Les nutriments restent une base
+
             if target_owner != spore.teamId:
-                # Plus target_biomass est grand, plus on retire de points au score
-                # On utilise un multiplicateur fort pour que la biomasse soit le critère décisif
-                score -= (target_biomass * 15) 
+                # GROS BONUS : C'est ici qu'on spread !
+                # On veut aller là où on n'est PAS encore.
+                score += 100 
                 
-                # Sécurité absolue : Si on ne peut pas gagner le combat, on ignore
+                # Mais on veut la biomasse la plus PETITE possible (facile à capturer)
+                # Chaque point de biomasse ennemie réduit l'intérêt de la case
+                score -= (target_biomass * 25)
+
+                # Sécurité : On ne fonce pas dans un mur plus gros que nous
                 if target_biomass >= spore.biomass:
                     continue
             else:
-                # Bonus si la case nous appartient déjà (mouvement gratuit)
-                score += 20
+                # Si la case est déjà à nous, le score est plus faible 
+                # car cela ne nous aide pas à "spread"
+                score += 10 
+                # Le seul avantage est que le mouvement est gratuit.
 
-            # 3. Pénalité de distance pour rester efficace
-            score -= distance * 2
+            # Pénalité de distance pour ne pas viser l'autre bout de la map inutilement
+            score -= distance * 1.2
 
             if score > best_score:
                 best_score = score
